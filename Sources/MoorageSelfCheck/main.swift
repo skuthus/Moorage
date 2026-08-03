@@ -85,6 +85,43 @@ if CommandLine.arguments.contains("probe") {
                     }
                 }
             }
+            // Write+delete cycle: upload a marker file to the first storage
+            // root, then delete it, printing raw results.
+            if CommandLine.arguments.contains("delete") {
+                let storage = ids[0]
+                let temp = FileManager.default.temporaryDirectory.appendingPathComponent("moorage-delete-test.txt")
+                try Data("delete me".utf8).write(to: temp)
+                do {
+                    let handle = try await device.sendObject(
+                        storageID: storage, parentHandle: PTP.rootParentHandle,
+                        name: "moorage-delete-test.txt", fileURL: temp, size: 9, modified: Date()
+                    )
+                    print("probe: uploaded test file, handle 0x\(String(handle, radix: 16))")
+                    do {
+                        try await device.deleteObject(handle)
+                        print("probe: DeleteObject OK")
+                    } catch {
+                        print("probe: DeleteObject FAILED: \(error)")
+                    }
+                    // Also try deleting the stale write-test.txt from documents.
+                    let rootHandles = try await device.objectHandles(storageID: storage, parentHandle: PTP.rootParentHandle)
+                    for h in rootHandles {
+                        guard let i = try? await device.objectInfo(h), i.filename == "documents" else { continue }
+                        let docs = try await device.objectHandles(storageID: storage, parentHandle: h)
+                        for dh in docs {
+                            guard let di = try? await device.objectInfo(dh), di.filename.hasPrefix("write-test") || di.filename.hasPrefix("paste-test") || di.filename.hasPrefix("finder-style") || di.filename.hasPrefix("root-test") else { continue }
+                            do {
+                                try await device.deleteObject(dh)
+                                print("probe: deleted stale \(di.filename)")
+                            } catch {
+                                print("probe: delete \(di.filename) FAILED: \(error)")
+                            }
+                        }
+                    }
+                } catch {
+                    print("probe: upload FAILED: \(error)")
+                }
+            }
             await device.disconnect()
             print("probe: SUCCESS, full MTP conversation works")
         } catch {

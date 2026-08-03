@@ -40,16 +40,32 @@ final class WebDAVMounter {
         if let existing = active[device.urlHost] { return existing.mountPoint }
 
         let backend = MTPDavBackend(urlHost: device.urlHost)
-        // Eager connect: fail fast on busy/locked devices, get the real name.
-        let volumeName: String
-        do {
-            volumeName = try await backend.prepare()
-        } catch {
+        // Eager connect, with retries: right after plug-in the device may not
+        // be ready yet, and Image Capture's daemon transiently claims new MTP
+        // devices before releasing them. One instant attempt would fail races
+        // that resolve themselves within seconds.
+        var volumeName: String?
+        for attempt in 1...5 {
+            do {
+                DebugLog.log("mount: prepare attempt \(attempt) for \(device.name)")
+                volumeName = try await backend.prepare()
+                DebugLog.log("mount: prepared, volume '\(volumeName ?? "")'")
+                break
+            } catch {
+                DebugLog.log("mount: prepare attempt \(attempt) failed: \(error)")
+                await backend.shutdown()
+                if attempt < 5 {
+                    try? await Task.sleep(for: .seconds(Double(attempt)))
+                }
+            }
+        }
+        guard let volumeName else {
             throw MountError.failed("Could not open the device. Unlock it, choose File Transfer mode, and make sure no other app (Image Capture, Photos, Android File Transfer) has claimed it.")
         }
 
         let server = DavServer(backend: backend)
         server.debugLogging = true
+        server.logHandler = { DebugLog.log("dav " + $0) }
         try server.start()
 
         let dirName = sanitize(volumeName.isEmpty ? device.name : volumeName)
@@ -60,8 +76,13 @@ final class WebDAVMounter {
             n += 1
         }
         try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+        // A previous run that died uncleanly can leave a dead webdav mount on
+        // this path; mounting over it would stack. Sweep first.
+        _ = try? await run("/sbin/umount", ["-f", mountPoint.path])
+        _ = try? await run("/sbin/umount", ["-f", mountPoint.path])
 
         let result = try await run("/sbin/mount_webdav", ["-v", dirName, server.url.absoluteString, mountPoint.path])
+        DebugLog.log("mount: mount_webdav exit \(result.status) \(result.output)")
         guard result.status == 0 else {
             server.stop()
             await backend.shutdown()

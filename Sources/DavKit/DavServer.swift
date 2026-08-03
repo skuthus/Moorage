@@ -21,6 +21,9 @@ public final class DavServer: @unchecked Sendable {
 
     /// Per-request stderr logging, for development and the demo server.
     public var debugLogging = false
+    /// Optional sink for request/error lines (the app writes these to a file;
+    /// NSLog from LSUIElement apps has proven unreliable to query).
+    public nonisolated(unsafe) var logHandler: (@Sendable (String) -> Void)?
 
     public init(backend: any DavBackend) {
         self.backend = backend
@@ -29,7 +32,9 @@ public final class DavServer: @unchecked Sendable {
 
     private func logRequest(_ request: HTTPRequest) {
         guard debugLogging else { return }
-        NSLog("dav: %@ %@ depth=%@ len=%d", request.method, request.rawTarget, request.header("depth") ?? "-", request.body.count)
+        let line = "\(request.method) \(request.rawTarget) depth=\(request.header("depth") ?? "-") len=\(request.body.count)"
+        logHandler?(line)
+        NSLog("dav: %@", line)
     }
 
     public func start() throws {
@@ -201,7 +206,9 @@ public final class DavServer: @unchecked Sendable {
                 try HTTPResponse.send(io, status: 501)
             }
         } catch let error where !(error is SocketIO.IOError) {
-            if debugLogging { NSLog("dav: %@ %@ -> error %@", request.method, request.rawTarget, "\(error)") }
+            if debugLogging {
+                logHandler?("\(request.method) \(request.rawTarget) -> \(status(for: error)) (\(error))")
+            }
             try HTTPResponse.send(io, status: status(for: error))
         }
     }

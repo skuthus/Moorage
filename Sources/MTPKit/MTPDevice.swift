@@ -153,7 +153,9 @@ public actor MTPDevice {
             storageID: storageID, parentHandle: parentHandle,
             filename: name, size: size, isFolder: false, modified: modified
         )
-        let infoResponse = try await transact(
+        await lockBus()
+        defer { unlockBus() }
+        let infoResponse = try await performTransaction(
             .sendObjectInfo,
             params: [storageID, parentHandle],
             dataOut: dataset
@@ -239,6 +241,31 @@ public actor MTPDevice {
         return (event, container.responseParams())
     }
 
+    // MARK: - Bus lock
+
+    // Actor isolation alone is NOT enough: every await inside a multi-phase
+    // operation (SendObjectInfo + SendObject) is a reentrancy point where a
+    // concurrent caller's transaction can interleave on the wire and desync
+    // the session. This FIFO gate makes each full transaction atomic.
+    private var busBusy = false
+    private var busWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private func lockBus() async {
+        if !busBusy {
+            busBusy = true
+            return
+        }
+        await withCheckedContinuation { busWaiters.append($0) }
+    }
+
+    private func unlockBus() {
+        if busWaiters.isEmpty {
+            busBusy = false
+        } else {
+            busWaiters.removeFirst().resume() // hand the lock to the next waiter
+        }
+    }
+
     // MARK: - Transaction plumbing
 
     private struct TransactionReply {
@@ -263,6 +290,12 @@ public actor MTPDevice {
     /// response. `dataOut` sends a data phase; otherwise any data phase the
     /// device sends is collected and returned.
     private func transact(_ op: PTP.Op, params: [UInt32], dataOut: Data? = nil) async throws -> TransactionReply {
+        await lockBus()
+        defer { unlockBus() }
+        return try await performTransaction(op, params: params, dataOut: dataOut)
+    }
+
+    private func performTransaction(_ op: PTP.Op, params: [UInt32], dataOut: Data? = nil) async throws -> TransactionReply {
         let tid = nextTransactionID(for: op)
         try await transport.write(
             PTPContainer.command(op, transactionID: tid, params: params).encoded(),

@@ -53,6 +53,8 @@ Two quirks already earned on real hardware (Kindle Paperwhite):
 
 Also learned: a client that dies mid-transaction leaves stale containers in the bulk-in pipe, which the next session misreads as its own replies. Connect now drains the pipe and clears stalls first, and data reads skip stale containers by transaction ID.
 
+The subtlest one: **Swift actor isolation does not make multi-phase MTP transactions atomic.** Every `await` inside SendObjectInfo+SendObject is a reentrancy point, and webdavfs issues requests concurrently, so a GetPartialObject could interleave mid-upload and desync the session permanently (transaction ID mismatches, garbage handles, phantom failures on every subsequent mutation). MTPDevice now holds an explicit FIFO bus lock across each complete transaction. Single-threaded test harnesses never catch this class of bug; only a real concurrent client (Finder) does.
+
 **Strategy:** strict-spec core plus a quirk table that grows from bug reports. libmtp's quirk list is readable for reference (reading LGPL source for facts is fine; no code copying).
 
 ## 7. Honest speed ceiling

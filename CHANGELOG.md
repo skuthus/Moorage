@@ -13,7 +13,15 @@ All notable changes to Moorage.
   are documented dead ends in docs/PITFALLS.md.
 - MTPKit: pure Swift MTP/PTP over IOUSBHost. Kindle quirks handled:
   vendor-specific MTP interface detection, strict transaction-ID-0 outside
-  sessions, stale-pipe drain on connect.
+  sessions, stale-pipe drain on connect. FIFO bus lock makes multi-phase
+  transactions atomic under webdavfs's concurrent requests (actor isolation
+  alone reenters at every await).
+- Full write lifecycle verified on-device: paste, rename, delete, mkdir,
+  nested ops, 2 MB binary round-trip byte-identical.
+- Single-storage devices (Kindle) mount the storage as the volume root; no
+  read-only "Internal Storage" wrapper to trip Finder pastes.
+- Mount robustness: retry with backoff at attach (Image Capture races),
+  stale-mount sweep before mounting, debug log at ~/Library/Logs/Moorage.log.
 - Finder junk (.DS_Store, ._AppleDouble) swallowed in RAM, never sent to
   the device.
 - MoorageSelfCheck: 50 checks covering MTP codec and the WebDAV server,

@@ -22,6 +22,10 @@ actor MTPDavBackend: DavBackend {
     }
 
     private var storagesByName = [String: MTPStorageInfo]()
+    /// Single-storage devices (Kindles, most phones without SD cards) skip the
+    /// storage folder level entirely: the storage IS the volume root. Multi-
+    /// storage devices keep one folder per storage.
+    private var soleStorageName: String?
     private enum Container: Hashable {
         case storageRoot(UInt32)
         case folder(UInt32)
@@ -62,6 +66,7 @@ actor MTPDavBackend: DavBackend {
                 names[name] = storage
             }
             storagesByName = names
+            soleStorageName = names.count == 1 ? names.keys.first : nil
             device = dev
             return dev
         } catch let error as MTPError {
@@ -83,6 +88,7 @@ actor MTPDavBackend: DavBackend {
     }
 
     private func mapError(_ error: MTPError) -> DavError {
+        DebugLog.log("mtp error: \(error)")
         switch error.kind {
         case .deviceGone, .deviceBusy: return .unavailable
         case .response(let code) where code == .storeFull: return .insufficientStorage
@@ -199,9 +205,28 @@ actor MTPDavBackend: DavBackend {
         path.joined(separator: "/")
     }
 
+    /// Maps a client-visible path to the internal storage-prefixed path.
+    private func internalPath(_ path: [String]) async throws -> [String] {
+        _ = try await connectedDevice()
+        if let sole = soleStorageName {
+            return [sole] + path
+        }
+        return path
+    }
+
     // MARK: - DavBackend
 
-    func stat(path: [String]) async throws -> DavEntry {
+    func stat(path clientPath: [String]) async throws -> DavEntry {
+        _ = try await connectedDevice()
+        // The flattened root is the device itself.
+        if clientPath.isEmpty, soleStorageName != nil {
+            return DavEntry(name: deviceName, isDirectory: true, size: 0)
+        }
+        let path = try await internalPath(clientPath)
+        return try await statInternal(path: path)
+    }
+
+    private func statInternal(path: [String]) async throws -> DavEntry {
         if let name = path.last {
             if let data = shadow[shadowKey(path)] {
                 return DavEntry(name: name, isDirectory: false, size: UInt64(data.count), modified: Date())
@@ -221,7 +246,8 @@ actor MTPDavBackend: DavBackend {
         }
     }
 
-    func list(path: [String]) async throws -> [DavEntry] {
+    func list(path clientPath: [String]) async throws -> [DavEntry] {
+        let path = try await internalPath(clientPath)
         switch try await resolve(path) {
         case .root:
             return storagesByName.keys.sorted().map {
@@ -243,7 +269,8 @@ actor MTPDavBackend: DavBackend {
         }.sorted { $0.name < $1.name }
     }
 
-    func read(path: [String], offset: UInt64, length: Int) async throws -> Data {
+    func read(path clientPath: [String], offset: UInt64, length: Int) async throws -> Data {
+        let path = try await internalPath(clientPath)
         if let data = shadow[shadowKey(path)] {
             guard offset < UInt64(data.count) else { return Data() }
             let start = Int(offset)
@@ -262,7 +289,8 @@ actor MTPDavBackend: DavBackend {
         }
     }
 
-    func write(path: [String], contentsOf url: URL) async throws {
+    func write(path clientPath: [String], contentsOf url: URL) async throws {
+        let path = try await internalPath(clientPath)
         guard let name = path.last else { throw DavError.forbidden }
 
         // Junk never reaches the device.
@@ -300,7 +328,8 @@ actor MTPDavBackend: DavBackend {
         }
     }
 
-    func delete(path: [String]) async throws {
+    func delete(path clientPath: [String]) async throws {
+        let path = try await internalPath(clientPath)
         if shadow.removeValue(forKey: shadowKey(path)) != nil { return }
         let (container, name) = try await resolveParent(path)
         guard let node = try await children(of: container)[name] else { throw DavError.notFound }
@@ -316,7 +345,8 @@ actor MTPDavBackend: DavBackend {
         }
     }
 
-    func makeDirectory(path: [String]) async throws {
+    func makeDirectory(path clientPath: [String]) async throws {
+        let path = try await internalPath(clientPath)
         let (container, name) = try await resolveParent(path)
         guard let storageID = storageID(of: container) else { throw DavError.conflict }
         guard try await children(of: container)[name] == nil else { throw DavError.exists }
@@ -335,7 +365,9 @@ actor MTPDavBackend: DavBackend {
         }
     }
 
-    func move(from: [String], to: [String]) async throws {
+    func move(from clientFrom: [String], to clientTo: [String]) async throws {
+        let from = try await internalPath(clientFrom)
+        let to = try await internalPath(clientTo)
         // Shadow entries just move in RAM.
         if let data = shadow.removeValue(forKey: shadowKey(from)) {
             shadow[shadowKey(to)] = data

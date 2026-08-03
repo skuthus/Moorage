@@ -49,7 +49,13 @@ echo "==> Built: $APP_BUNDLE"
 
 if [ "${1:-}" = "--install" ]; then
   echo "==> Installing to /Applications..."
-  killall Moorage 2>/dev/null || true
+  # Quit cleanly rather than killall: a hard kill terminates the app while it
+  # holds an open USB pipe mid-transfer, which leaves the MTP device's endpoint
+  # wedged until it's physically replugged. A graceful quit runs the app's
+  # unmount + USB-disconnect path first.
+  osascript -e 'tell application "Moorage" to quit' 2>/dev/null || true
+  for _ in 1 2 3 4 5; do pgrep -x Moorage >/dev/null || break; sleep 1; done
+  killall Moorage 2>/dev/null || true   # fallback if it didn't quit
   rm -rf "/Applications/$APP_NAME.app"
   ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
   open "/Applications/$APP_NAME.app"

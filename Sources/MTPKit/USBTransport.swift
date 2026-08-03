@@ -136,6 +136,21 @@ public final class USBTransport: @unchecked Sendable {
     }
 
     private func enqueue(pipe: IOUSBHostPipe, data: NSMutableData?, timeout: TimeInterval) async throws -> Int {
+        do {
+            return try await enqueueOnce(pipe: pipe, data: data, timeout: timeout)
+        } catch let error as MTPError {
+            // "Unable to enqueue IO" means the pipe is wedged — typically left
+            // stalled by a previous client that died mid-transfer (an app
+            // crash or force-quit). Reset the endpoint and try once more,
+            // rather than forcing the user to unplug the device.
+            guard case .usb = error.kind else { throw error }
+            try? pipe.__abort(with: .synchronous)
+            try? pipe.clearStall()
+            return try await enqueueOnce(pipe: pipe, data: data, timeout: timeout)
+        }
+    }
+
+    private func enqueueOnce(pipe: IOUSBHostPipe, data: NSMutableData?, timeout: TimeInterval) async throws -> Int {
         try await withCheckedThrowingContinuation { continuation in
             do {
                 try pipe.enqueueIORequest(with: data, completionTimeout: timeout) { status, bytesTransferred in

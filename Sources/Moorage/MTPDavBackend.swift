@@ -216,7 +216,17 @@ actor MTPDavBackend: DavBackend {
 
     // MARK: - DavBackend
 
+    /// A zero-byte file at the volume root that tells Spotlight never to index
+    /// this volume. Without it, Spotlight recursively walks the whole device
+    /// over MTP, and since MTP serves one command at a time, that background
+    /// index starves all foreground browsing — the volume looks frozen.
+    static let neverIndexFile = ".metadata_never_index"
+
     func stat(path clientPath: [String]) async throws -> DavEntry {
+        // Answer this synthetically and instantly, before touching the device.
+        if clientPath == [Self.neverIndexFile] {
+            return DavEntry(name: Self.neverIndexFile, isDirectory: false, size: 0)
+        }
         _ = try await connectedDevice()
         // The flattened root is the device itself.
         if clientPath.isEmpty, soleStorageName != nil {
@@ -270,6 +280,7 @@ actor MTPDavBackend: DavBackend {
     }
 
     func read(path clientPath: [String], offset: UInt64, length: Int) async throws -> Data {
+        if clientPath == [Self.neverIndexFile] { return Data() }
         let path = try await internalPath(clientPath)
         if let data = shadow[shadowKey(path)] {
             guard offset < UInt64(data.count) else { return Data() }

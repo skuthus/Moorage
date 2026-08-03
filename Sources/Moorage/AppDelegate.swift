@@ -1,5 +1,5 @@
 import AppKit
-import FileProvider
+@preconcurrency import FileProvider
 import ServiceManagement
 import MTPKit
 
@@ -18,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "smartphone", accessibilityDescription: "Moorage")
+            button.image = MenuBarIcon.image(mounted: false)
+            button.image?.accessibilityDescription = "Moorage"
         }
         statusItem.menu = NSMenu()
         statusItem.menu?.delegate = self
@@ -28,7 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.onChange = { [weak self] current in
             self?.devicesChanged(current)
         }
-        watcher.start()
+
+        // Clear any orphaned mounts from a previous run before we start
+        // watching — a stale mount hangs Finder, so this must happen first.
+        Task {
+            await mounter.sweepOrphanMounts()
+            watcher.start()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -84,6 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     revealed.insert(device.urlHost)
                     NSWorkspace.shared.open(mountPoint)
                 }
+            } catch WebDAVMounter.MountError.inProgress {
+                // Another attempt for this device is already running; ignore.
             } catch {
                 errors[device.urlHost] = "\(error)"
             }
@@ -93,16 +102,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
-        let mounted = devices.contains { mounter.isMounted($0) }
-        let symbol = mounted ? "smartphone.badge.checkmark" : "smartphone"
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Moorage")
-            ?? NSImage(systemSymbolName: "smartphone", accessibilityDescription: "Moorage")
+        // Authoritative: reflect whether anything is actually mounted, not
+        // whether the current scan happens to list a mounted device.
+        button.image = MenuBarIcon.image(mounted: mounter.hasActiveMounts)
+        button.image?.accessibilityDescription = "Moorage"
     }
 
     // MARK: - Actions
 
+    /// A device from the scan or, failing that, the current mounts.
+    private func device(forHost host: String) -> MTPDeviceRef? {
+        devices.first { $0.urlHost == host } ?? mounter.mountedDevices.first { $0.urlHost == host }
+    }
+
     @objc private func toggleMount(_ sender: NSMenuItem) {
-        guard let device = devices.first(where: { $0.urlHost == sender.representedObject as? String }) else { return }
+        guard let host = sender.representedObject as? String,
+              let device = device(forHost: host) else { return }
         Task {
             if mounter.isMounted(device) {
                 await mounter.unmount(device)
@@ -116,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func revealDevice(_ sender: NSMenuItem) {
         guard let host = sender.representedObject as? String,
-              let device = devices.first(where: { $0.urlHost == host }),
+              let device = device(forHost: host),
               let mountPoint = mounter.mountPoint(for: device) else { return }
         NSWorkspace.shared.open(mountPoint)
     }
@@ -146,7 +161,15 @@ extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        if devices.isEmpty {
+        // Show every device the scan sees, plus any that are mounted even if
+        // the scan momentarily doesn't list them (e.g. mid-replug), deduped by
+        // identity. This keeps a live mount visible in the menu.
+        var shown = devices
+        for mounted in mounter.mountedDevices where !shown.contains(mounted) {
+            shown.append(mounted)
+        }
+
+        if shown.isEmpty {
             let item = NSMenuItem(title: "No MTP device connected", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -155,7 +178,7 @@ extension AppDelegate: NSMenuDelegate {
             menu.addItem(hint)
         }
 
-        for device in devices {
+        for device in shown {
             let mounted = mounter.isMounted(device)
             let header = NSMenuItem(title: device.name, action: nil, keyEquivalent: "")
             header.isEnabled = false

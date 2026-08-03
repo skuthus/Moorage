@@ -5,7 +5,7 @@ import IOKit.usb
 /// A connected MTP-capable device, discovered from the IO registry without
 /// opening anything. Safe to build from any process; opening the interface
 /// (USBTransport) is what takes exclusive access.
-public struct MTPDeviceRef: Sendable, Equatable {
+public struct MTPDeviceRef: Sendable, Equatable, Hashable {
     public let serial: String
     public let name: String
     public let vendorID: Int
@@ -25,6 +25,18 @@ public struct MTPDeviceRef: Sendable, Equatable {
     public var urlHost: String {
         if !serial.isEmpty { return serial }
         return String(format: "%04x.%04x.%08x", vendorID, productID, locationID)
+    }
+
+    /// Identity is the mount host: the same physical device keeps the same
+    /// identity across replugs, even though its USB locationID changes. Without
+    /// this, a replug looks like one device leaving and a different one
+    /// arriving, desyncing mount state from the device list.
+    public static func == (lhs: MTPDeviceRef, rhs: MTPDeviceRef) -> Bool {
+        lhs.urlHost == rhs.urlHost
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(urlHost)
     }
 
     public var mtpURL: URL {

@@ -39,6 +39,10 @@ let package = Package(
             name: "MoorageSelfCheck",
             dependencies: ["MTPKit", "DavKit"]
         ),
+        // Renders the app icon in code, per size. No image assets.
+        .executableTarget(
+            name: "IconGenerator"
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

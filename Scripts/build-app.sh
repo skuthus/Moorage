@@ -26,9 +26,10 @@ trap 'rm -rf "$BUILD_TMP"' EXIT
 TMP_APP="$BUILD_TMP/$APP_NAME.app"
 
 echo "==> Assembling $APP_NAME.app..."
-mkdir -p "$TMP_APP/Contents/MacOS"
+mkdir -p "$TMP_APP/Contents/MacOS" "$TMP_APP/Contents/Resources"
 cp "$BIN_PATH/Moorage" "$TMP_APP/Contents/MacOS/Moorage"
 cp "$ROOT_DIR/build-resources/Info.plist" "$TMP_APP/Contents/Info.plist"
+cp "$ROOT_DIR/build-resources/AppIcon.icns" "$TMP_APP/Contents/Resources/AppIcon.icns"
 
 echo "==> Signing..."
 SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/' || true)"

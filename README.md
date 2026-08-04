@@ -1,6 +1,10 @@
-# Moorage
+<p align="center">
+  <img src="build-resources/AppIcon.png" alt="Moorage" width="160">
+</p>
 
-Mount your Android phone in Finder. Small, fast, free.
+<h1 align="center">Moorage</h1>
+
+<p align="center">Mount your Android phone in Finder. Small, fast, free.</p>
 
 Moorage is a macOS menu bar app that mounts MTP devices (Android phones, tablets, cameras, e-readers) as real Finder volumes. Plug in, unlock the device, and it appears under ~/Moorage and in Finder. No transfer window, no drivers, no kernel extensions, no system extensions to approve.
 

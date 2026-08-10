@@ -75,6 +75,9 @@ final class WebDAVMounter {
     /// The devices currently mounted, as captured at mount time.
     var mountedDevices: [MTPDeviceRef] { active.values.map(\.device) }
 
+    /// Mount point paths, for a fast force-unmount on quit.
+    var mountPointPaths: [String] { active.values.map { $0.mountPoint.path } }
+
     func mount(_ device: MTPDeviceRef) async throws -> URL {
         if let existing = active[device.urlHost] { return existing.mountPoint }
         // Runs to the first `await` synchronously on the main actor, so this

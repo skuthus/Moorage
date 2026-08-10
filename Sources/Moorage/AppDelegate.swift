@@ -40,14 +40,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         watcher.stop()
-        let mounter = self.mounter
-        // Blocking teardown: unmount cleanly before the process dies.
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            await mounter.unmountAll()
-            semaphore.signal()
+        // Don't block quit on a graceful teardown — that beach-balls the app.
+        // The process exit releases the USB session and kills the server
+        // threads for free; the only thing that would outlive us is the WebDAV
+        // mount, so force-unmount each volume and let it finish on its own. The
+        // spawned umount survives our exit, and next launch sweeps any stragglers.
+        for path in mounter.mountPointPaths {
+            let umount = Process()
+            umount.executableURL = URL(fileURLWithPath: "/sbin/umount")
+            umount.arguments = ["-f", path]
+            try? umount.run()   // fire and forget; never waited on
         }
-        _ = semaphore.wait(timeout: .now() + 10)
     }
 
     /// Earlier Moorage builds used File Provider; clear any domains they left

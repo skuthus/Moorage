@@ -27,7 +27,7 @@ ptpcamera / Image Capture / Photos auto-claim MTP/PTP devices on plug. Android F
 
 **Strategy:** the extension reports serverUnreachable when it can't claim the device; the menu bar surfaces a plain-language reason. Handle on day one, not after launch.
 
-## 5. Mount tech dead ends (why we're on File Provider)
+## 5. Mount tech dead ends (why we landed on a WebDAV bridge)
 
 macFUSE needs a kext; Apple Silicon kexts need Reduced Security toggled in Recovery Mode. Instant dealbreaker.
 

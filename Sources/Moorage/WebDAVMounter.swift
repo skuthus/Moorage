@@ -150,7 +150,7 @@ final class WebDAVMounter {
             server.stop()
             await backend.shutdown()
             try? FileManager.default.removeItem(at: mountPoint)
-            throw MountError.failed("could not launch mount_webdav: \(error.localizedDescription)")
+            throw MountError.failed("Could not start the mount helper.")
         }
 
         var mounted = false
@@ -164,7 +164,7 @@ final class WebDAVMounter {
             server.stop()
             await backend.shutdown()
             try? FileManager.default.removeItem(at: mountPoint)
-            throw MountError.failed("mount_webdav did not mount the volume")
+            throw MountError.failed("Could not mount the volume. Unplug the device and try again.")
         }
         DebugLog.log("mount: volume up at \(mountPoint.path)")
 
